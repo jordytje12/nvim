@@ -9,6 +9,9 @@ spell/
 # nvim-pack-lock.json in version control - see :help vim.pack-lockfile
 # For the official `nvim-lua/kickstart.nvim` git repository, we leave it ignored to avoid unneeded
 # merge conflicts.
-nvim-pack-lock.json
+#
+# Dit is een persoonlijke fork, dus de lockfile wordt juist wel bijgehouden: die pint de
+# exacte plugin-versies zodat deze config op een andere machine hetzelfde werkt.
+# nvim-pack-lock.json
 
 .DS_Store

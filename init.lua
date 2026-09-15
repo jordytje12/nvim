@@ -99,7 +99,9 @@ do
   vim.g.maplocalleader = ' '
 
   -- Set to true if you have a Nerd Font installed and selected in the terminal
-  vim.g.have_nerd_font = false
+  -- Je hebt Nerd Fonts geinstalleerd; zet dit op false als iconen als blokjes tonen
+  -- (dan staat je terminal-font niet op een Nerd Font variant).
+  vim.g.have_nerd_font = true
 
   -- [[ Setting options ]]
   --  See `:help vim.o`
@@ -414,6 +416,14 @@ do
       { '<leader>t', group = '[T]oggle' },
       { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
       { 'gr', group = 'LSP Actions', mode = { 'n' } },
+      -- Groepen uit lua/custom/plugins/*
+      { '<leader>b', group = '[B]uffer' },
+      { '<leader>c', group = '[C]Make' },
+      { '<leader>g', group = '[G]it' },
+      { '<leader>p', group = '[P]roject / sessie' },
+      { '<leader>l', group = '[L]aravel' },
+      { '<leader>d', group = '[D]ebug (DAP)' },
+      { '<leader>x', group = 'Diagnostics (Trouble)' },
     },
   }
 
@@ -733,18 +743,123 @@ do
   --  See `:help lsp-config` for information about keys and how to configure
   ---@type table<string, vim.lsp.Config>
   local servers = {
-    -- clangd = {},
-    -- gopls = {},
-    -- pyright = {},
-    -- tsc = {},
-    --
     -- Some languages (like rust) have entire language plugins that can be useful:
     --    https://github.com/mrcjkb/rustaceanvim
     --
     -- But for many setups, the LSP (`rust_analyzer`) will work just fine
     -- rust_analyzer = {},
 
-    stylua = {}, -- Used to format Lua code
+    -- ---------- web / next.js ----------
+    html = {},
+    cssls = {},
+    vtsls = {},
+    eslint = {},
+    graphql = {},
+
+    tailwindcss = {
+      settings = {
+        tailwindCSS = {
+          experimental = {
+            classRegex = {
+              { 'cva\\(([^)]*)\\)', '["\'`]([^"\'`]*).*?["\'`]' },
+              { 'cx\\(([^)]*)\\)', "(?:'|\"|`)([^']*)(?:'|\"|`)" },
+              { 'cn\\(([^)]*)\\)', "(?:'|\"|`)([^']*)(?:'|\"|`)" },
+            },
+          },
+        },
+      },
+    },
+
+    -- De schemas zelf komen uit SchemaStore.nvim; die plugin wordt pas in SECTION 10
+    -- geladen, dus lua/custom/plugins/web.lua vult `settings.json.schemas` daarna aan
+    -- met een tweede vim.lsp.config('jsonls', ...) call.
+    jsonls = {},
+
+    emmet_language_server = {
+      filetypes = { 'html', 'htmldjango', 'typescriptreact', 'javascriptreact', 'css', 'sass', 'scss', 'less', 'blade' },
+    },
+
+    -- ---------- laravel / php ----------
+    -- Gratis tier: licenceKey leeg laten. Blade erbij zodat completion ook in
+    -- .blade.php werkt; laravel.nvim leunt op een actieve client in die buffers.
+    intelephense = {
+      filetypes = { 'php', 'blade' },
+      settings = {
+        intelephense = {
+          files = { maxSize = 5000000 },
+        },
+      },
+    },
+
+    -- ---------- python / django ----------
+    -- basedpyright doet types; ruff doet lint, format en imports
+    basedpyright = {
+      settings = {
+        basedpyright = {
+          disableOrganizeImports = true,
+          analysis = {
+            autoSearchPaths = true,
+            diagnosticMode = 'openFilesOnly',
+            -- basedpyright default is "recommended", wat op Django een muur van errors geeft
+            typeCheckingMode = 'standard',
+            diagnosticSeverityOverrides = {
+              reportMissingTypeStubs = 'none',
+              reportUnknownMemberType = 'none',
+              reportUnknownVariableType = 'none',
+              reportUnknownArgumentType = 'none',
+              reportUnknownParameterType = 'none',
+              reportAny = 'none',
+              reportExplicitAny = 'none',
+              reportUnusedCallResult = 'none',
+              reportImplicitOverride = 'none',
+              -- ruff meldt deze al
+              reportUnusedImport = 'none',
+              reportUnusedVariable = 'none',
+            },
+          },
+        },
+      },
+
+      -- Poetry met virtualenvs.in-project: basedpyright vindt <root>/.venv niet zelf.
+      -- config.settings moet in-place gemuteerd worden; de client deelt deze tabelreferentie,
+      -- dus opnieuw toewijzen (config.settings = {...}) zou niet doorkomen.
+      before_init = function(_, config)
+        local root = config.root_dir
+        if not root then return end
+        local py = vim.fs.joinpath(root, '.venv', 'bin', 'python')
+        if vim.uv.fs_stat(py) then config.settings.python = { pythonPath = py } end
+      end,
+    },
+
+    ruff = {
+      init_options = {
+        settings = {
+          organizeImports = true,
+          showSyntaxErrors = false, -- basedpyright meldt deze al
+          lint = { enable = true },
+        },
+      },
+      on_attach = function(client, _)
+        client.server_capabilities.hoverProvider = false -- basedpyright doet hover
+      end,
+    },
+
+    -- ---------- c / c++ / cmake ----------
+    -- Bewust geen --query-driver. Die vlag zet de include-paden van Apple clang
+    -- vooraan terwijl clangd zijn eigen resource-dir blijft gebruiken; die mix breekt de
+    -- macOS SDK-headers ("unknown type name '__int64_t'" -> cascade in <type_traits>).
+    -- Mason's clangd vindt de SDK prima zelf via -isysroot.
+    clangd = {
+      cmd = {
+        'clangd',
+        '--background-index',
+        '--clang-tidy',
+        '--header-insertion=iwyu',
+        '--completion-style=detailed',
+        '--offset-encoding=utf-16',
+      },
+    },
+    neocmake = {},
 
     -- Special Lua Config, as recommended by neovim help docs
     lua_ls = {
@@ -803,7 +918,16 @@ do
   -- You can press `g?` for help in this menu.
   local ensure_installed = vim.tbl_keys(servers or {})
   vim.list_extend(ensure_installed, {
-    -- You can add other tools here that you want Mason to install
+    -- Formatters (zie SECTION 7) en debug adapters. Dit zijn geen LSP's, dus ze horen
+    -- hier en niet in `servers` -- de loop hieronder roept vim.lsp.enable aan.
+    'stylua',
+    'prettierd',
+    'prettier',
+    'djlint',
+    'clang-format',
+    'blade-formatter',
+    'pint',
+    'codelldb',
   })
 
   require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -821,31 +945,46 @@ end
 do
   -- [[ Formatting ]]
   vim.pack.add { gh 'stevearc/conform.nvim' }
+  local prettier = { 'prettierd', 'prettier', stop_after_first = true }
+
   require('conform').setup {
     notify_on_error = false,
-    format_on_save = function(bufnr)
-      -- You can specify filetypes to autoformat on save here:
-      local enabled_filetypes = {
-        -- lua = true,
-        -- python = true,
-      }
-      if enabled_filetypes[vim.bo[bufnr].filetype] then
-        return { timeout_ms = 500 }
-      else
-        return nil
-      end
-    end,
+    -- 3s: djlint is een Python-proces en haalt 2s bij koude start niet altijd
+    format_on_save = { timeout_ms = 3000, lsp_format = 'fallback' },
     default_format_opts = {
       lsp_format = 'fallback', -- Use external formatters if configured below, otherwise use LSP formatting. Set to `false` to disable LSP formatting entirely.
     },
+    formatters = {
+      djlint = {
+        prepend_args = { '--profile', 'django' },
+      },
+    },
     -- You can also specify external formatters in here.
     formatters_by_ft = {
-      -- rust = { 'rustfmt' },
-      -- Conform can also run multiple formatters sequentially
-      -- python = { "isort", "black" },
-      --
-      -- You can use 'stop_after_first' to run the first available formatter from the list
-      -- javascript = { "prettierd", "prettier", stop_after_first = true },
+      lua = { 'stylua' },
+
+      javascript = prettier,
+      typescript = prettier,
+      javascriptreact = prettier,
+      typescriptreact = prettier,
+      json = prettier,
+      jsonc = prettier,
+      css = prettier,
+      scss = prettier,
+      html = prettier,
+      markdown = prettier,
+      graphql = prettier,
+      liquid = prettier,
+
+      php = { 'pint', 'php_cs_fixer', stop_after_first = true },
+      blade = { 'blade-formatter' },
+
+      python = { 'ruff_organize_imports', 'ruff_format' },
+      htmldjango = { 'djlint' },
+
+      -- conform noemt de formatter clang_format, de mason package clang-format
+      c = { 'clang_format' },
+      cpp = { 'clang_format' },
     },
   }
 
@@ -896,7 +1035,17 @@ do
       -- <c-k>: Toggle signature help
       --
       -- See `:help blink-cmp-config-keymap` for defining your own keymap
-      preset = 'default',
+      preset = 'enter',
+
+      -- Het 'enter'-preset zet <CR> op { 'accept', 'fallback' }, en `fallback` slaat andere
+      -- mappings over. Daarmee zou nvim-autopairs zijn <CR> kwijtraken (netjes inspringen
+      -- tussen { en }). 'fallback_to_mappings' geeft de toets wel aan autopairs door zodra
+      -- het completion-menu dicht is.
+      ['<CR>'] = { 'accept', 'fallback_to_mappings' },
+
+      -- Tab: eerst snippet-sprong, dan uit een paar springen (zie lua/custom/tabout.lua),
+      -- anders gewoon een tab.
+      ['<Tab>'] = { 'snippet_forward', function() return require('custom.tabout').jump() end, 'fallback' },
 
       -- For more advanced Luasnip keymaps (e.g. selecting choice nodes, expansion) see:
       --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
@@ -948,7 +1097,19 @@ do
   vim.pack.add { { src = gh 'nvim-treesitter/nvim-treesitter', version = 'main' } }
 
   -- Ensure basic parsers are installed
-  local parsers = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
+  -- stylua: ignore
+  local parsers = {
+    'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc',
+    -- web / next.js
+    -- jsonc heeft geen eigen parser; Neovim mapt dat filetype zelf al naar `json`
+    'css', 'scss', 'javascript', 'typescript', 'tsx', 'json', 'graphql', 'regex', 'yaml', 'toml',
+    -- laravel: php_only is de parser voor bestanden zonder <?php-wrapper (blade injecteert die)
+    'php', 'php_only', 'blade',
+    -- python / django
+    'python', 'htmldjango',
+    -- c++ / cmake
+    'cpp', 'cmake', 'make',
+  }
   require('nvim-treesitter').install(parsers)
 
   ---@param buf integer
@@ -1014,16 +1175,20 @@ do
   --  Here are some example plugins that I've included in the Kickstart repository.
   --  Uncomment any of the lines below to enable them (you will need to restart nvim).
   --
+  -- kickstart.plugins.debug blijft uit: die installeert delve en nvim-dap-go. De
+  -- DAP-setup voor C/C++ (codelldb) staat in lua/custom/plugins/cpp.lua.
   -- require 'kickstart.plugins.debug'
-  -- require 'kickstart.plugins.indent_line'
+  require 'kickstart.plugins.indent_line'
+  -- kickstart.plugins.lint blijft uit: eslint en ruff linten al via LSP, nvim-lint
+  -- zou daar een tweede set diagnostics overheen leggen.
   -- require 'kickstart.plugins.lint'
-  -- require 'kickstart.plugins.autopairs'
-  -- require 'kickstart.plugins.neo-tree'
+  require 'kickstart.plugins.autopairs'
+  require 'kickstart.plugins.neo-tree'
 
   -- NOTE: You can add your own plugins, configuration, etc. in `lua/custom/plugins/*.lua`.
   --
   -- For independent modules, uncomment the convenience loader:
-  -- require 'custom.plugins'
+  require 'custom.plugins'
   --
   -- `custom.plugins` automatically loads files from that directory, but their
   -- order is unspecified. If plugins depend on each other, keep them in the same
